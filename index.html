@@ -1,0 +1,217 @@
+<!-- templates/index.html (Frontend) -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPU Benchmark - 3D Text Rendering Test</title>
+    <style>
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-top: 4px solid #000;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+        }
+        .hidden {
+            display: none;
+        }
+        canvas {
+            border: 1px solid black;
+        }
+    </style>
+</head>
+<body>
+    <h1>Raytrac.ing - GPU Web Benchmark</h1>
+    <label for="start-quality-level">Start Quality Level:</label>
+    <input type="number" id="start-quality-level" value="1" min="1" max="1000">
+    <button onclick="run3DTextBenchmark()">Run 3D Text Benchmark</button>
+    <div>
+        <label>
+            <input type="checkbox" id="shadow-toggle" checked> Enable Shadows
+        </label>
+        <label>
+            <input type="checkbox" id="point-light-toggle" checked> Enable Point Light
+        </label>
+        <label>
+            <input type="checkbox" id="spot-light-toggle" checked> Enable Spot Light
+        </label>
+    </div>
+    <div id="progress-container">
+        <p id="progress">Rendering Progress: <span id="quality-level">1</span>, Current FPS: <span id="current-fps">0</span><span id="loading-icon" class="spinner hidden"></span></p>        
+    </div>
+    <p id="result"></p>
+    <canvas id="textCanvas"></canvas>
+    
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        async function run3DTextBenchmark() {
+            const startTime = performance.now();
+            const canvas = document.getElementById('textCanvas');
+            const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+            let width, height;
+            if (window.innerWidth > 768) {
+                width = window.innerWidth / 2;
+                height = width * 9 / 16;
+            } else {
+                width = window.innerWidth;
+                height = width * 9 / 16;
+            }
+            renderer.setSize(width, height);
+            canvas.style.width = `${width}px`;
+            canvas.style.height = `${height}px`;
+
+            // Shadow toggle option
+            const enableShadows = document.getElementById('shadow-toggle').checked;
+            renderer.shadowMap.enabled = enableShadows;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb); // Light blue sky background
+
+            const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+            camera.position.set(0, 5, 15);
+            camera.lookAt(0, 0, 0);
+
+            // Directional Light with shadows
+            const light = new THREE.DirectionalLight(0xffffff, 1);
+            light.position.set(10, 10, 10);
+            if (enableShadows) {
+                light.castShadow = true;
+                light.shadow.camera.top = 10;
+                light.shadow.camera.bottom = -10;
+                light.shadow.camera.left = -10;
+                light.shadow.camera.right = 10;
+                light.shadow.mapSize.width = 2048;
+                light.shadow.mapSize.height = 2048;
+            }
+            scene.add(light);
+
+            // Point Light
+            const enablePointLight = document.getElementById('point-light-toggle').checked;
+            if (enablePointLight) {
+                const pointLight = new THREE.PointLight(0xffaa00, 1, 100);
+                pointLight.position.set(-10, 10, 10);
+                scene.add(pointLight);
+            }
+
+            // Spot Light
+            const enableSpotLight = document.getElementById('spot-light-toggle').checked;
+            if (enableSpotLight) {
+                const spotLight = new THREE.SpotLight(0xffffff, 1);
+                spotLight.position.set(15, 20, 5);
+                spotLight.angle = Math.PI / 6;
+                spotLight.penumbra = 0.2;
+                spotLight.decay = 2;
+                spotLight.distance = 50;
+                if (enableShadows) {
+                    spotLight.castShadow = true;
+                }
+                scene.add(spotLight);
+            }
+
+            // Ambient Light
+            const ambientLight = new THREE.AmbientLight(0x404040); // soft white light
+            scene.add(ambientLight);
+
+            // Ground Plane
+            const planeGeometry = new THREE.PlaneGeometry(50, 50);
+            const planeMaterial = new THREE.ShadowMaterial({ opacity: 0.5 });
+            const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+            plane.rotation.x = -Math.PI / 2;
+            plane.position.y = -1;
+            if (enableShadows) {
+                plane.receiveShadow = true;
+            }
+            scene.add(plane);
+
+            const loader = new THREE.FontLoader();
+            loader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', function (font) {
+                const texts = [];
+                const textMaterial = new THREE.MeshPhongMaterial({ color: 0xff0000, specular: 0x555555, shininess: 30 });
+                const textGeometryOptions = {
+                    font: font,
+                    size: Math.min(Math.max(width / 50, 0.5), 2), // Adjust text size with min and max limits
+                    height: 0.2,
+                    curveSegments: 12,
+                    bevelEnabled: true,
+                    bevelThickness: 0.05,
+                    bevelSize: 0.03,
+                    bevelOffset: 0,
+                    bevelSegments: 5
+                };
+
+                let qualityLevel = parseInt(document.getElementById('start-quality-level').value) || 1;
+                for (let i = 0; i < qualityLevel; i++) {
+                    addText();
+                }
+                let fps = 0;
+                let startTime = performance.now();
+                let lastSecondTime = performance.now();
+                let frameCount = 0;
+
+                function addText() {
+                    const textGeometry = new THREE.TextGeometry('Raytrac.ing', textGeometryOptions);
+                    const textMesh = new THREE.Mesh(textGeometry, textMaterial);
+                    if (enableShadows) {
+                        textMesh.castShadow = true;
+                    }
+                    textMesh.position.set((Math.random() - 0.5) * 30, (Math.random() - 0.5) * 15, (Math.random() - 0.5) * 30);
+                    textMesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+                    textMesh.velocity = new THREE.Vector3((Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.5);
+                    texts.push(textMesh);
+                    scene.add(textMesh);
+                }
+
+                function renderScene() {
+                    texts.forEach(text => {
+                        text.position.add(text.velocity);
+                        if (text.position.x > 20 || text.position.x < -20) text.velocity.x = -text.velocity.x;
+                        if (text.position.y > 10 || text.position.y < -10) text.velocity.y = -text.velocity.y;
+                        if (text.position.z > 20 || text.position.z < -20) text.velocity.z = -text.velocity.z;
+                        text.rotation.x += 0.01;
+                        text.rotation.y += 0.01;
+                    });
+                    renderer.render(scene, camera);
+                }
+
+                function updateBenchmark() {
+                    const currentTime = performance.now();
+                    frameCount++;
+                    renderScene();
+
+                    if (currentTime - lastSecondTime >= 1000) {
+                        fps = frameCount;
+                        frameCount = 0;
+                        lastSecondTime = currentTime;
+                        document.getElementById('current-fps').innerText = fps;
+                    }
+
+                    if (currentTime - startTime >= 5000) {
+                        if (fps > 58 && qualityLevel < 5000) { // Increase quality level until FPS drops below 58
+                            qualityLevel++;
+                            document.getElementById('quality-level').innerText = qualityLevel;
+                            addText();
+                        } else {
+                            document.getElementById('loading-icon').classList.add('hidden');
+                            document.getElementById('result').innerText = `Max quality level at 60 FPS: ${qualityLevel - 1}`;
+                            return;
+                        }
+                    }
+                    requestAnimationFrame(updateBenchmark);
+                }
+
+                document.getElementById('loading-icon').classList.remove('hidden');
+                requestAnimationFrame(updateBenchmark);
+            });
+        }
+    </script>
+</body>
+</html>
